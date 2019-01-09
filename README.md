@@ -1,3 +1,13 @@
+Forked from https://github.com/HydroSense/FeatherM0_Davis_ISS_rx
+
+Removed unneeded code
+
+Increased accuracy (Now losing less than 5% of packets versus 90%) 
+
+Other needed changes
+
+
+
 Intro
 -----
 Source modified from [kobuki's VPTools](https://github.com/kobuki/VPTools) to run on the Adafruit Feather M0 board by Alan Marchiori.
