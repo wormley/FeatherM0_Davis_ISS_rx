@@ -1,12 +1,12 @@
-Forked from https://github.com/HydroSense/FeatherM0_Davis_ISS_rx
 
 Removed unneeded code
 
 Increased accuracy (Now losing less than 5% of packets versus 90%) 
 
-Other needed changes
+Other changes
 
 
+Forked from https://github.com/HydroSense/FeatherM0_Davis_ISS_rx
 
 Intro
 -----
