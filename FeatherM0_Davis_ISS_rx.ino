@@ -4,7 +4,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 
-#define DAVISRFM69_DEBUG
+//#define DAVISRFM69_DEBUG
 
 #include "DavisRFM69.h"
 #include "PacketFifo.h"
@@ -116,7 +116,7 @@ void decode_packet(RadioData* rd) {
 
 
 	curWx.windv = (packet[1]);
-	if (curWx.windv >= 7) curWx.windv++;				// Recieved wind of 7 and up to at least 27 is increased by 1 on the console though  JF
+	if (curWx.windv >= 7) curWx.windv++;				// Recieved wind of 7 and up to at least 28 is increased by 1 on the console though  JF
    	curWx.winddraw = packet[2];							// The console occasionaly shows a speed of 7 with a raw of 6, somewhat random?
 
 	// wind data is present in every packet, windd == 0 (packet[2] == 0) means there's no anemometer
@@ -212,7 +212,7 @@ void decode_packet(RadioData* rd) {
 
 			case VP2P_WINDGUST:
 				curWx.windgust = packet[3];
-				if (curWx.windgust >= 7) curWx.windgust++;								// Recieved wind of 7+ to at least 27 is increased by 1 on the console   JF
+				if (curWx.windgust >= 7) curWx.windgust++;			// Recieved wind of 7+ to at least 28 is increased by 1 on the console   JF
 				curWx.windgustd = packet[5] & 0xf0 >> 4;			// Gust direction (16 Rose directions)   JF
 								
 #ifdef DAVISRFM69_DEBUG
@@ -248,15 +248,15 @@ void decode_packet(RadioData* rd) {
 
 
 #ifdef DAVISRFM69_DEBUG
-		int diff = rd->delta - stations[packet[0] & 0x7].interval;									// Added by JF
-		print_value("fei", round(rd->fei * 61.03515625 / 1000), F(", "));
+	int diff = rd->delta - stations[packet[0] & 0x7].interval;									// Added by JF
+	print_value("fei", round(rd->fei * 61.03515625 / 1000), F(", "));
 	print_value("delta", rd->delta, F(", "));
 	print_value("diff", diff, F(""));
 	Serial.println();
 #endif
-//	if (rd->delta >= 1 && diff <= TUNEIN_USEC) {												// Accounts for any slight timing
-//		stations[packet[0] & 0x7].interval = stations[packet[0] & 0x7].interval  + (diff/2);	// drift by either Tx or Rx    JF
-//		}
+
+//	Fine tunes timing but not needed as diff is usually small anyway   JF
+//	if (rd->delta >= 1 && diff <= TUNEIN_USEC) stations[packet[0] & 0x7].interval = stations[packet[0] & 0x7].interval  + (diff/2);	
 
 	Serial.print("c:");
 	Serial.print(RecieverID);
