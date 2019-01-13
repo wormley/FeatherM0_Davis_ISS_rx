@@ -147,7 +147,6 @@ void DavisRFM69::loop() {
 			Serial.println(stations[curStation].channel);
 #endif
 			lostPackets++;
-			stations[curStation].missedPackets++;
 			stations[curStation].lostPackets++;
 			stations[curStation].lastRx += stations[curStation].interval;
 			stations[curStation].channel = nextChannel(stations[curStation].channel);
@@ -176,7 +175,7 @@ void DavisRFM69::loop() {
 	   // do nothing.
 			return;
 			}
-		} //if (mode == SM_RECEIVING)
+		}
 
 		// next check for any station that's about to transmit
 		// if found, tune in
@@ -326,14 +325,16 @@ void DavisRFM69::handleRadioInt() {
 			fifo.queue((byte*) DATA, CHANNEL, -RSSI, FEI, stations[curStation].lastSeen > 0 ? lastRx - stations[curStation].lastSeen : 0);
 			}
 
-		stations[stIx].earlyAmt = difftime(lastRx, stations[stIx].recvBegan);
-		stations[stIx].lostPackets = 0;
-		stations[stIx].lastRx = stations[stIx].lastSeen = lastRx;
-		stations[stIx].channel = nextChannel(CHANNEL);
 #ifdef DAVISRFM69_DEBUG
+		stations[stIx].earlyAmt = difftime(lastRx, stations[stIx].recvBegan);
 		Serial.print("early amt = ");
 		Serial.println(stations[stIx].earlyAmt);
 #endif
+		stations[stIx].channel = nextChannel(CHANNEL);
+		stations[stIx].lostPackets = 0;
+		stations[stIx].lastRx = lastRx;
+		stations[stIx].lastSeen = lastRx;
+
 	// no longer waiting to RX (if we were at all anwyay)
 		mode = SM_IDLE;
 		// standby the radio
@@ -381,7 +382,6 @@ void DavisRFM69::initStations() {
 		stations[i].lastRx = 0;
 		stations[i].lastSeen = 0;
 		stations[i].packets = 0;
-		stations[i].missedPackets = 0;
 		stations[i].syncBegan = 0;
 		}
 	}

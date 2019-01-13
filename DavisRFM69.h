@@ -21,8 +21,8 @@
 
 #include "PacketFifo.h"
 
-#define RecieverID     1 // Allow for more than one Rx sending data at a time.
-#define DAVIS_PACKET_LEN     10 // ISS has fixed packet lengths of eight bytes, including CRC and trailing repeater info
+#define RecieverID     0 // Allow for more than one Rx sending data at a time.
+#define DAVIS_PACKET_LEN     10 // ISS has fixed packet lengths of eight bytes including CRC and two bytes trailing repeater info
 #define SPI_CS               SS // SS is the SPI slave select pin, for instance D10 on atmega328
 #define RF69_IRQ_PIN 3
 #define RF69_IRQ_NUM 3
@@ -74,7 +74,6 @@ typedef struct __attribute__((packed)) Station {
 	uint32_t interval;    	// packet transmit interval for the station: (41 + id) / 16 * 1M microsecs
 	uint32_t numResyncs;  	// number of times discovery of this station started because of packet loss
 	uint32_t packets; 		// total number of received packets after (re)restart
-	uint32_t missedPackets;	// total number of misssed packets after (re)restart
 	uint32_t lostPackets;     // missed packets since a packet was last seen from this station
 	uint32_t syncBegan; 		// time sync began for this station.
 	uint32_t recvBegan; 		// time we tuned in to receive
@@ -85,14 +84,14 @@ typedef struct __attribute__((packed)) Station {
 
 typedef struct __attribute__((packed)) WxData {
 	byte rain = 0;
-	float rainrate = -1;
+	int rainrate = -1;
 	float rh = 0.0;
 	short soilleaf = -1;
 	float solar = 0.00;
 	float temp = 0.0;
 	short uv = -1;
-	short vcap = -1;
-	short vsolar = -1;
+	float vcap = -1;
+	float vsolar = -1;
 	short windd = - 1;
 	short winddraw = -1;
 	short windgust = -1;

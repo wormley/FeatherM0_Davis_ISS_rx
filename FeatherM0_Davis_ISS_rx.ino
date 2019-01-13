@@ -88,8 +88,6 @@ void decode_packet(RadioData* rd) {
 
   // for more about the protocol see:
   // https://github.com/dekay/DavisRFM69/wiki/Message-Protocol
-	int val;
-	float fval;
 	byte* packet = rd->packet;
 
 #ifdef DAVISRFM69_DEBUG
@@ -116,67 +114,57 @@ void decode_packet(RadioData* rd) {
 	// calculated or flagged with a special "missing sensor" value, mostly -1.
 	// It's the CPE's responsibility to interpret our output accordingly.
 
-	byte id = radio.DATA[0] & 7;
-	int stIx = radio.findStation(id);
 
-	val = (packet[1]);
-	if (val >= 7) val++;							// Recieved wind of 7 and up to at least 27 is increased by 1 on the console though  JF
-	curWx.windv = val;								// I have observed a wind speed of 7 on the console so this is not exactly accurate
-   	curWx.winddraw = packet[2];
+	curWx.windv = (packet[1]);
+	if (curWx.windv >= 7) curWx.windv++;				// Recieved wind of 7 and up to at least 27 is increased by 1 on the console though  JF
+   	curWx.winddraw = packet[2];							// The console occasionaly shows a speed of 7 with a raw of 6, somewhat random?
 
 	// wind data is present in every packet, windd == 0 (packet[2] == 0) means there's no anemometer
 	if (packet[2] != 0) {
-		if (stations[stIx].type == STYPE_VUE) {
-			val = (packet[2] << 1) | (packet[4] & 2) >> 1;
-			val = round(val * 360 / 512);
-			}
+		if (stations[packet[0] & 0x7].type == STYPE_VUE) curWx.windd = round(((packet[2] << 1) | (packet[4] & 2) >> 1) * 360 / 512);
 		else {
-			val = 9 + round((packet[2] - 1) * (342.0 / 255.0));
-			if (val > 345) val = ((val - 345) * 2) + 345;			// Smooths out some of the dead zone around N similiar to console   JF
+			curWx.windd = 9 + round((packet[2] - 1) * (342.0 / 255.0));
+			if (curWx.windd > 345) curWx.windd = ((curWx.windd - 345) * 2) + 345;			// Smooths out some of the dead zone around N similiar to console   JF
 			}
 		}
 	else {
-		val = 0;
+		curWx.windd = 0;
 		}
-	curWx.windd = val;
 
 #ifdef DAVISRFM69_DEBUG
-	print_value("windv", val, F(", "));
+	print_value("windv", curWx.windv, F(", "));
 	print_value("winddraw", packet[2], F(", "));
-	print_value("windd", val, F(", "));
+	print_value("windd", curWx.windd, F(", "));
 #endif
 
 	switch (packet[0] >> 4) {
 
 			case VP2P_UV:
-				val = word(packet[3], packet[4]) >> 6;
-				if (val < 0x3ff) fval = (float) (val / 50.0);
-				else fval - 1;
+				curWx.uv = word(packet[3], packet[4]) >> 6;
+				if (curWx.uv < 0x3ff) curWx.uv = (curWx.uv / 50.0);
+				else curWx.uv =  -1;
 
-				curWx.uv = fval;
 #ifdef DAVISRFM69_DEBUG
-				print_value("uv", fval, F(", "));
+				print_value("uv", curWx.uv, F(", "));
 #endif
 				break;
 
 			case VP2P_SOLAR:
-				val = word(packet[3], packet[4]) >> 6;
-				if (val < 0x3fe) fval = (float) (val * 1.757936);
-				else fval - 1;
+				curWx.solar = word(packet[3], packet[4]) >> 6;
+				if (curWx.solar < 0x3fe) curWx.solar = (curWx.solar * 1.757936);
+				else curWx.solar = -1;
 				
-				curWx.solar = fval;
 #ifdef DAVISRFM69_DEBUG
-				print_value("solar", fval, F(", "));
+				print_value("solar", curWx.solar, F(", "));
 #endif
 				break;
 
 			case VP2P_RAIN:
-				if (packet[3] == 0x80) val - 1;
-				else val = packet[3];
+				if (packet[3] == 0x80) curWx.rain = -1;
+				else curWx.rain = packet[3];
 				
-				curWx.rain = val;
 #ifdef DAVISRFM69_DEBUG
-				print_value("rain", val, F(", "));
+				print_value("rain", curWx.rain, F(", "));
 #endif
 				break;
 
@@ -197,52 +185,39 @@ void decode_packet(RadioData* rd) {
 				
 
 
-				val = (packet[4] & 0x30) << 4 | packet[3];
-				if (val == 0x3ff) val = -1;
-				else if ((packet[4] & 0x40) == 0) val >>= 4; // packet[4] bit 6: strong == 0, light == 1
+				curWx.rainrate = (packet[4] & 0x30) << 4 | packet[3];
+				if (curWx.rainrate == 0x3ff) curWx.rainrate = -1;
+				else if ((packet[4] & 0x40) == 0) curWx.rainrate >>= 4; // packet[4] bit 6: strong == 0, light == 1
 				
-
-
-
-				curWx.rainrate = val;
 #ifdef DAVISRFM69_DEBUG
-				print_value("rainsecs", val, F(", "));
+				print_value("rainsecs", curWx.rainrate, F(", "));
 #endif
 				break;
 
 			case VP2P_TEMP:
-			  //if (packet[3] == 0xff) {
-		//        print_value("temp", -100, F(", "));
-			  //} else {
-				{
-				  //val = (int)packet[3] << 4 | packet[4] >> 4;
-				  //val = (packet[3]* 256 + packet[4]) / 160;
-				val = ((int16_t) ((packet[3] << 8) | packet[4])) / 16;
-				fval = (float) (val / 10.0);
-				curWx.temp = fval;
-				}
+				curWx.temp = (((int16_t) ((packet[3] << 8) | packet[4])) / 16) / 10.0;
+				
 #ifdef DAVISRFM69_DEBUG
-				print_value("temp", fval, F(", "));
+				print_value("temp", curWx.temp, F(", "));
 #endif
 				break;
 
 			case VP2P_HUMIDITY:
-				fval = ((packet[4] >> 4) << 8 | packet[3]) / 10.0; // 0 -> no sensor
-				curWx.rh = fval;
+				curWx.rh = ((packet[4] >> 4) << 8 | packet[3]) / 10.0; // 0 -> no sensor
+
 #ifdef DAVISRFM69_DEBUG
-				print_value("rh", val, F(", "));
+				print_value("rh", curWx.rh, F(", "));
 #endif
 				break;
 
 			case VP2P_WINDGUST:
-				val = packet[3];
-				if (val >= 7) val++;										// Recieved wind of 7+ to at least 27 is increased by 1 on the console   JF
-				curWx.windgust = val;
-				val = packet[5] & 0xf0 >> 4;
-				curWx.windgustd = val;										// Gust direction (16 Rose directions)   JF
+				curWx.windgust = packet[3];
+				if (curWx.windgust >= 7) curWx.windgust++;								// Recieved wind of 7+ to at least 27 is increased by 1 on the console   JF
+				curWx.windgustd = packet[5] & 0xf0 >> 4;			// Gust direction (16 Rose directions)   JF
+								
 #ifdef DAVISRFM69_DEBUG
-				print_value("windgust", val, F(", "));
-				print_value("gustd", val, F(", "));	
+				print_value("windgust", curWx.windgust, F(", "));
+				print_value("gustd", curWx.windgustd, F(", "));
 #endif
 				break;
 
@@ -251,40 +226,39 @@ void decode_packet(RadioData* rd) {
 			  // see https://github.com/matthewwall/weewx-meteostick/blob/master/bin/user/meteostick.py
 				curWx.soilleaf = -1;
 #ifdef DAVISRFM69_DEBUG
-				print_value("soilleaf", -1, F(", "));
+				print_value("soilleaf", curWx.soilleaf, F(", "));
 #endif
 				break;
 
 			case VUEP_VCAP:
-				val = (packet[3] << 2) | (packet[4] & 0xc0) >> 6;
-				fval = (float) (val / 100.0);
-				curWx.vcap = fval;
+				curWx.vcap = ((packet[3] << 2) | (packet[4] & 0xc0) >> 6) / 100.0;
+
 #ifdef DAVISRFM69_DEBUG
-				print_value("vcap", fval, F(", "));
+				print_value("vcap", curWx.vcap, F(", "));
 #endif
 				break;
 
 			case VUEP_VSOLAR:
-				val = (packet[3] << 2) | (packet[4] & 0xc0) >> 6;
-				fval = (float) (val / 100.0);
-				curWx.vsolar = fval;
+				curWx.vsolar = ((packet[3] << 2) | (packet[4] & 0xc0) >> 6) / 100.0;
+
 #ifdef DAVISRFM69_DEBUG
-				print_value("vsolar", fval, F(", "));
+				print_value("vsolar", curWx.vsolar, F(", "));
 #endif
 		}
 
-	int diff = rd->delta - stations[packet[0] & 0x7].interval;   // Added by JF
 
 #ifdef DAVISRFM69_DEBUG
-	print_value("fei", round(rd->fei * 61.03515625 / 1000), F(", "));
+		int diff = rd->delta - stations[packet[0] & 0x7].interval;									// Added by JF
+		print_value("fei", round(rd->fei * 61.03515625 / 1000), F(", "));
 	print_value("delta", rd->delta, F(", "));
 	print_value("diff", diff, F(""));
 	Serial.println();
 #endif
-	if (rd->delta >= 1 && diff <= TUNEIN_USEC) {														// Accounts for any slight timing
-		stations[packet[0] & 0x7].interval = stations[packet[0] & 0x7].interval  + (diff/2);	// drift by either Tx or Rx    JF
-		}
+//	if (rd->delta >= 1 && diff <= TUNEIN_USEC) {												// Accounts for any slight timing
+//		stations[packet[0] & 0x7].interval = stations[packet[0] & 0x7].interval  + (diff/2);	// drift by either Tx or Rx    JF
+//		}
 
+	Serial.print("c:");
 	Serial.print(RecieverID);
 	Serial.print(",");
 	Serial.print(radio.packets + radio.lostPackets);
@@ -322,6 +296,12 @@ void decode_packet(RadioData* rd) {
 	Serial.print(curWx.windgustd);
 	Serial.print(",");
 	Serial.print(curWx.windv);
+	//Serial.print(",");
+	//printHex(&packet[0], 1);
+	//Serial.print(",");
+	//printHex(&packet[1], 1);
+	//Serial.print(",");
+	//printHex(&packet[2], 1);
 
 	Serial.println();
 	}
