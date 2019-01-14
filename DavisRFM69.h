@@ -39,10 +39,10 @@
 #define RF69_DAVIS_BW_WIDE    2
 
 #define RESYNC_THRESHOLD 49       // max. number of lost packets from a station before rediscovery
-#define LATE_PACKET_THRESH 10000   // packet is considered missing after this many micros   Increased from 5000 to 10000 by JF
+#define LATE_PACKET_THRESH 5000   // packet is considered missing after this many micros
 #define MAX_STATIONS 8            // max. stations this code is able to handle
 
-#define TUNEIN_USEC		20000L 	// 10 milliseconds, amount of time before an expect TX to tune the radio in.	    							
+#define TUNEIN_USEC		15000L 	// 10 milliseconds, amount of time before an expect TX to tune the radio in.	    							
 									// this includes possible radio turnaround tx->rx or sleep->rx transitions
 									// 10 ms is reliable, should be able to get this faster but
 									// the loop is polled, so slow loop calls will cause missed packets
@@ -138,10 +138,11 @@ public:
 
 	void setChannel(byte channel);
 	static uint16_t crc16_ccitt(volatile byte *buf, byte len, uint16_t initCrc = 0);
+	uint16_t calc_crc(volatile byte data, byte len, byte crc);
 
 	void initialize(byte freqBand);
-	bool receiveDone();
-	int readRSSI(bool forceTrigger = false);
+//	bool receiveDone();
+	int readRSSI();
 
 	// allow hacking registers by making these public
 	byte readReg(byte addr);
@@ -159,8 +160,8 @@ public:
 
 	void initStations();
 	void nextStation();
-
 	static void setStations(Station *_stations, byte n);
+
 
 protected:
 	void(*userInterrupt)();

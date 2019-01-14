@@ -84,6 +84,9 @@ void print_value(char* vname, uint32_t value, const __FlashStringHelper* sep) {
 	Serial.print(vname); Serial.print(F(":")); Serial.print(value); Serial.print(sep);
 	}
 
+
+
+
 void decode_packet(RadioData* rd) {
 
   // for more about the protocol see:
@@ -258,6 +261,7 @@ void decode_packet(RadioData* rd) {
 //	Fine tunes timing but not needed as diff is usually small anyway   JF
 //	if (rd->delta >= 1 && diff <= TUNEIN_USEC) stations[packet[0] & 0x7].interval = stations[packet[0] & 0x7].interval  + (diff/2);	
 
+
 	Serial.print("c:");
 	Serial.print(RecieverID);
 	Serial.print(",");
@@ -306,6 +310,7 @@ void decode_packet(RadioData* rd) {
 	Serial.println();
 	}
 
+#ifdef DAVISRFM69_DEBUG
 void printHex(volatile byte* packet, byte len) {
 	for (byte i = 0; i < len; i++) {
 		if (!(packet[i] & 0xf0)) Serial.print('0');
@@ -313,3 +318,4 @@ void printHex(volatile byte* packet, byte len) {
 		if (i < len - 1) Serial.print('-');
 		}
 	}
+	#endif

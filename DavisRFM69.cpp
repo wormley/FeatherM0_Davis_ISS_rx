@@ -66,7 +66,7 @@ void DavisRFM69::initialize(byte freqBand) {
 		/* 0x1E */ { REG_AFCFEI, RF_AFCFEI_AFCAUTOCLEAR_OFF | RF_AFCFEI_AFCAUTO_ON },
 		/* 0x25 */ { REG_DIOMAPPING1, RF_DIOMAPPING1_DIO0_01 }, //DIO0 is the only IRQ we're using
 		/* 0x28 */ { REG_IRQFLAGS2, RF_IRQFLAGS2_FIFOOVERRUN }, // Reset the FIFOs. Fixes a problem I had with bad first packet.
-		/* 0x29 */ { REG_RSSITHRESH, 190 }, // real dBm = -(REG_RSSITHRESH / 2) -> 190 raw = -95 dBm
+		/* 0x29 */ { REG_RSSITHRESH, 185 }, // real dBm = -(REG_RSSITHRESH / 2) -> 190 raw = -95 dBm
 		/* 0x2d */ { REG_PREAMBLELSB, 0x4 }, // Davis has four preamble bytes 0xAAAAAAAA -- use 6 for TX for this setup
 		/* 0x2e */ { REG_SYNCCONFIG, RF_SYNC_ON | RF_SYNC_FIFOFILL_AUTO | RF_SYNC_SIZE_2 | RF_SYNC_TOL_2 },  // Allow a couple erros in the sync word
 		/* 0x2f */ { REG_SYNCVALUE1, 0xcb }, // Davis ISS first sync byte. http://madscientistlabs.blogspot.ca/2012/03/first-you-get-sugar.html
@@ -105,12 +105,6 @@ void DavisRFM69::initialize(byte freqBand) {
 	fifo.flush();
 	initStations();
 	lastDiscStep = micros();
-	}
-
-
-void DavisRFM69::setStations(Station *_stations, byte n) {
-	stations = _stations;
-	numStations = n;
 	}
 
 	/**
@@ -273,6 +267,12 @@ void DavisRFM69::loop() {
 		}
 	}
 
+	void DavisRFM69::setStations(Station *_stations, byte n) {
+		stations = _stations;
+		numStations = n;
+		}
+
+
 	// Handle received packets, called from RFM69 ISR
 void DavisRFM69::handleRadioInt() {
 
@@ -430,8 +430,7 @@ byte DavisRFM69::reverseBits(byte b) {
 	}
 
 	// Davis CRC calculation from http://www.menie.org/georges/embedded/
-uint16_t DavisRFM69::crc16_ccitt(volatile byte *buf, byte len, uint16_t initCrc) {
-	uint16_t crc = initCrc;
+uint16_t DavisRFM69::crc16_ccitt(volatile byte *buf, byte len, uint16_t crc) {
 	while (len--) {
 		int i;
 		crc ^= *(char *) buf++ << 8;
@@ -446,7 +445,6 @@ uint16_t DavisRFM69::crc16_ccitt(volatile byte *buf, byte len, uint16_t initCrc)
 	}
 
 void DavisRFM69::setMode(byte newMode) {
-  //Serial.println(newMode);
 	if (newMode == _mode) return;
 
 	if (_mode < COUNT_RF69_MODES) {
@@ -499,11 +497,7 @@ void DavisRFM69::receiveBegin() {
 	setMode(RF69_MODE_RX);
 	}
 
-bool DavisRFM69::receiveDone() {
-	return _packetReceived;
-	}
-
-int DavisRFM69::readRSSI(bool forceTrigger) {
+int DavisRFM69::readRSSI() {
 	int rssi = 0;
 	rssi = -readReg(REG_RSSIVALUE);
 	rssi >>= 1;
