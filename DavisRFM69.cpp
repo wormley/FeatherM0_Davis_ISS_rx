@@ -39,7 +39,6 @@ volatile uint32_t DavisRFM69::lostStations = 0;
 volatile byte DavisRFM69::stationsFound = 0;
 volatile byte DavisRFM69::curStation = 0;
 volatile byte DavisRFM69::numStations = 0;
-volatile byte DavisRFM69::discChannel = 0;
 volatile uint32_t DavisRFM69::lastDiscStep;
 volatile uint32_t rfm69_mode_counts[COUNT_RF69_MODES] = {};
 volatile uint32_t rfm69_mode_timer = 0;
@@ -66,7 +65,7 @@ void DavisRFM69::initialize(byte freqBand) {
 		/* 0x1E */ { REG_AFCFEI, RF_AFCFEI_AFCAUTOCLEAR_OFF | RF_AFCFEI_AFCAUTO_ON },
 		/* 0x25 */ { REG_DIOMAPPING1, RF_DIOMAPPING1_DIO0_01 }, //DIO0 is the only IRQ we're using
 		/* 0x28 */ { REG_IRQFLAGS2, RF_IRQFLAGS2_FIFOOVERRUN }, // Reset the FIFOs. Fixes a problem I had with bad first packet.
-		/* 0x29 */ { REG_RSSITHRESH, 185 }, // real dBm = -(REG_RSSITHRESH / 2) -> 190 raw = -95 dBm
+		/* 0x29 */ { REG_RSSITHRESH, 190 }, // real dBm = -(REG_RSSITHRESH / 2) -> 190 raw = -95 dBm
 		/* 0x2d */ { REG_PREAMBLELSB, 0x4 }, // Davis has four preamble bytes 0xAAAAAAAA -- use 6 for TX for this setup
 		/* 0x2e */ { REG_SYNCCONFIG, RF_SYNC_ON | RF_SYNC_FIFOFILL_AUTO | RF_SYNC_SIZE_2 | RF_SYNC_TOL_2 },  // Allow a couple erros in the sync word
 		/* 0x2f */ { REG_SYNCVALUE1, 0xcb }, // Davis ISS first sync byte. http://madscientistlabs.blogspot.ca/2012/03/first-you-get-sugar.html
@@ -99,12 +98,18 @@ void DavisRFM69::initialize(byte freqBand) {
 
 	mode = SM_IDLE;
 
-	setBand(freqBand);
-	setChannel(discChannel);
+	band = freqBand;
+
+	setChannel(0);
 
 	fifo.flush();
 	initStations();
 	lastDiscStep = micros();
+	}
+
+void DavisRFM69::setStations(Station *_stations, byte n) {
+	stations = _stations;
+	numStations = n;
 	}
 
 	/**
@@ -267,12 +272,6 @@ void DavisRFM69::loop() {
 		}
 	}
 
-	void DavisRFM69::setStations(Station *_stations, byte n) {
-		stations = _stations;
-		numStations = n;
-		}
-
-
 	// Handle received packets, called from RFM69 ISR
 void DavisRFM69::handleRadioInt() {
 
@@ -322,6 +321,12 @@ void DavisRFM69::handleRadioInt() {
 		if (stations[stIx].active) {
 
 			stations[stIx].packets++;
+
+
+
+
+
+
 			fifo.queue((byte*) DATA, CHANNEL, -RSSI, FEI, stations[curStation].lastSeen > 0 ? lastRx - stations[curStation].lastSeen : 0);
 			}
 
@@ -348,7 +353,7 @@ void DavisRFM69::handleRadioInt() {
 
 	// Calculate the next hop of the specified channel
 byte DavisRFM69::nextChannel(byte channel) {
-	return ++channel % getBandTabLength();
+	return ++channel % bandTabLengths[band];
 	}
 
 	// Find the station index in stations[] for station expected to tx the earliest and update curStation
@@ -432,9 +437,8 @@ byte DavisRFM69::reverseBits(byte b) {
 	// Davis CRC calculation from http://www.menie.org/georges/embedded/
 uint16_t DavisRFM69::crc16_ccitt(volatile byte *buf, byte len, uint16_t crc) {
 	while (len--) {
-		int i;
 		crc ^= *(char *) buf++ << 8;
-		for (i = 0; i < 8; ++i) {
+		for (int i = 0; i < 8; ++i) {
 			if (crc & 0x8000)
 				crc = (crc << 1) ^ 0x1021;
 			else
@@ -447,18 +451,12 @@ uint16_t DavisRFM69::crc16_ccitt(volatile byte *buf, byte len, uint16_t crc) {
 void DavisRFM69::setMode(byte newMode) {
 	if (newMode == _mode) return;
 
-	if (_mode < COUNT_RF69_MODES) {
-		rfm69_mode_counts[_mode] += difftime(micros(), rfm69_mode_timer);
-		rfm69_mode_timer = micros();
 #ifdef DAVISRFM69_DEBUG
 		Serial.print(_mode);
 		Serial.print(" -> ");
 		Serial.println(newMode);
 #endif
-		}
-	else {
-		Serial.println("INVALID MODE CHANGE.");
-		}
+
 	switch (newMode) {
 			case RF69_MODE_TX:
 				writeReg(REG_OPMODE, (readReg(REG_OPMODE) & 0xE3) | RF_OPMODE_TRANSMITTER);
@@ -478,11 +476,6 @@ void DavisRFM69::setMode(byte newMode) {
 				break;
 			default: return;
 		}
-
-		// we are using packet mode, so this check is not really needed
-		// but waiting for mode ready is necessary when going from sleep because the FIFO may not be immediately available from previous mode
-	//while (_mode == RF69_MODE_SLEEP && (readReg(REG_IRQFLAGS1) & RF_IRQFLAGS1_MODEREADY) == 0x00); // Wait for ModeReady
-
 	_mode = newMode;
 	}
 
@@ -531,11 +524,6 @@ void DavisRFM69::unselect() {
 	interrupts();
 	}
 
-
-void DavisRFM69::setBand(byte newBand) {
-	band = newBand;
-	}
-
 void DavisRFM69::setBandwidth(byte bw) {
 	switch (bw) {
 			case RF69_DAVIS_BW_NARROW:
@@ -550,8 +538,4 @@ void DavisRFM69::setBandwidth(byte bw) {
 			default:
 				return;
 		}
-	}
-
-byte DavisRFM69::getBandTabLength() {
-	return bandTabLengths[band];
 	}

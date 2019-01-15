@@ -21,7 +21,7 @@
 
 #include "PacketFifo.h"
 
-#define RecieverID     0 // Allow for more than one Rx sending data at a time.
+#define RecieverID     0		// Allow for more than one Rx sending data at a time.
 #define DAVIS_PACKET_LEN     10 // ISS has fixed packet lengths of eight bytes including CRC and two bytes trailing repeater info
 #define SPI_CS               SS // SS is the SPI slave select pin, for instance D10 on atmega328
 #define RF69_IRQ_PIN 3
@@ -33,21 +33,21 @@
 #define RF69_MODE_RX          3 // RX MODE
 #define RF69_MODE_TX          4 // TX MODE
 #define RF69_MODE_INIT		0xff // USED ONLY FOR INIT THIS IS NOT VALID OTHERWISE
-#define COUNT_RF69_MODES		 5 // Number of distinct radio modes (for stats tracking)
+#define COUNT_RF69_MODES	  5 // Number of distinct radio modes (for stats tracking)
 
 #define RF69_DAVIS_BW_NARROW  1
 #define RF69_DAVIS_BW_WIDE    2
 
-#define RESYNC_THRESHOLD 49       // max. number of lost packets from a station before rediscovery
-#define LATE_PACKET_THRESH 5000   // packet is considered missing after this many micros
-#define MAX_STATIONS 8            // max. stations this code is able to handle
+#define RESYNC_THRESHOLD	 49 // max. number of lost packets from a station before rediscovery
+#define LATE_PACKET_THRESH 15000 // packet is considered missing after this many micros
+#define MAX_STATIONS 8          // max. stations this code is able to handle
 
-#define TUNEIN_USEC		15000L 	// 10 milliseconds, amount of time before an expect TX to tune the radio in.	    							
-									// this includes possible radio turnaround tx->rx or sleep->rx transitions
-									// 10 ms is reliable, should be able to get this faster but
-									// the loop is polled, so slow loop calls will cause missed packets
-									//
-									//Increased from 10000 to 20000 by JF to reduce the # of missed packets
+#define TUNEIN_USEC		 20000L // 10 milliseconds, amount of time before an expect TX to tune the radio in.	    							
+								// this includes possible radio turnaround tx->rx or sleep->rx transitions
+								// 10 ms is reliable, should be able to get this faster but
+								// the loop is polled, so slow loop calls will cause missed packets
+								//
+								//Increased from 10000 to 15000 by JF
 
 #define DISCOVERY_STEP   150000000L	// 150 seconds
 
@@ -116,11 +116,9 @@ public:
 	static volatile byte stationsFound;
 	static volatile byte curStation;
 	static volatile byte numStations;
-	static volatile byte discChannel;
 	static volatile uint32_t lastDiscStep;
 
 	volatile uint32_t rfm69_mode_timer;
-	volatile uint32_t rfm69_mode_counts[COUNT_RF69_MODES];
 
 	static PacketFifo fifo;
 	static Station *stations;
@@ -138,18 +136,14 @@ public:
 
 	void setChannel(byte channel);
 	static uint16_t crc16_ccitt(volatile byte *buf, byte len, uint16_t initCrc = 0);
-	uint16_t calc_crc(volatile byte data, byte len, byte crc);
 
 	void initialize(byte freqBand);
-//	bool receiveDone();
 	int readRSSI();
 
 	// allow hacking registers by making these public
 	byte readReg(byte addr);
 	void writeReg(byte addr, byte val);
-	void setBand(byte newBand);
 	void setBandwidth(byte bw);
-	byte getBandTabLength();
 
 	byte nextChannel(byte channel);
 	int findStation(byte id);
@@ -160,8 +154,8 @@ public:
 
 	void initStations();
 	void nextStation();
-	static void setStations(Station *_stations, byte n);
 
+	static void setStations(Station *_stations, byte n);
 
 protected:
 	void(*userInterrupt)();

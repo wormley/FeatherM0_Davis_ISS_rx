@@ -38,22 +38,14 @@ void setup() {
 	Serial.println("Boot complete!");
 	}
 
-
 void loop() {
-	if (radio.fifo.hasElements()) {
-		decode_packet(radio.fifo.dequeue());
-		}
-
-	if (radio.mode == SM_RECEIVING) {
-		digitalWrite(LED, HIGH);
-		}
+	if (radio.fifo.hasElements()) decode_packet(radio.fifo.dequeue());
+	if (radio.mode == SM_RECEIVING)	digitalWrite(LED, HIGH);
 	else if (radio.mode == SM_SEARCHING) {
 		Blink(LED, 15);
 		delay(100);
 		}
-	else {
-		digitalWrite(LED, LOW);
-		}
+	else digitalWrite(LED, LOW);
 	radio.loop();
 	}
 
@@ -84,9 +76,6 @@ void print_value(char* vname, uint32_t value, const __FlashStringHelper* sep) {
 	Serial.print(vname); Serial.print(F(":")); Serial.print(value); Serial.print(sep);
 	}
 
-
-
-
 void decode_packet(RadioData* rd) {
 
   // for more about the protocol see:
@@ -112,11 +101,6 @@ void decode_packet(RadioData* rd) {
 
 	print_value("batt", (char*) (packet[0] & 0x8 ? "err" : "ok"), F(", "));
 #endif
-
-	// All packet payload values are printed unconditionally, either properly
-	// calculated or flagged with a special "missing sensor" value, mostly -1.
-	// It's the CPE's responsibility to interpret our output accordingly.
-
 
 	curWx.windv = (packet[1]);
 	if (curWx.windv >= 7) curWx.windv++;				// Recieved wind of 7 and up to at least 28 is increased by 1 on the console though  JF
@@ -279,8 +263,6 @@ void decode_packet(RadioData* rd) {
 	Serial.print(",");
 	Serial.print(curWx.rh);
 	Serial.print(",");
-	Serial.print(curWx.soilleaf);
-	Serial.print(",");
 	Serial.print(curWx.solar);
 	Serial.print(",");
 	Serial.print(curWx.temp);
@@ -300,12 +282,6 @@ void decode_packet(RadioData* rd) {
 	Serial.print(curWx.windgustd);
 	Serial.print(",");
 	Serial.print(curWx.windv);
-	//Serial.print(",");
-	//printHex(&packet[0], 1);
-	//Serial.print(",");
-	//printHex(&packet[1], 1);
-	//Serial.print(",");
-	//printHex(&packet[2], 1);
 
 	Serial.println();
 	}
