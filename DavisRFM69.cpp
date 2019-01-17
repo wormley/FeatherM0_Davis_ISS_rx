@@ -16,17 +16,14 @@
 //
 // Modified by Jason Foss in 2019 to simplify for use only with Adafruit Feather M0 Radio in Rx Mode.
 
-#include "DavisRFM69.h"
-#include "RFM69registers.h"
-#include "PacketFifo.h"
-
+#include <Arduino.h>            //assumes Arduino IDE v1.0 or greater
 #include <SPI.h>
 
-//#define DAVISRFM69_DEBUG
+#include "RFM69registers.h"
+#include "DavisRFM69.h"
 
-volatile byte DavisRFM69::DATA[DAVIS_PACKET_LEN];
+volatile byte  DavisRFM69::DATA[DAVIS_PACKET_LEN];
 volatile byte DavisRFM69::_mode = RF69_MODE_INIT;       // current transceiver state
-volatile bool DavisRFM69::_packetReceived = false;
 volatile byte DavisRFM69::CHANNEL = 0;
 volatile byte DavisRFM69::band = 0;
 volatile int DavisRFM69::RSSI = 0;   // RSSI measured immediately after payload reception
@@ -38,13 +35,13 @@ volatile uint32_t DavisRFM69::numResyncs = 0;
 volatile uint32_t DavisRFM69::lostStations = 0;
 volatile byte DavisRFM69::stationsFound = 0;
 volatile byte DavisRFM69::curStation = 0;
-volatile byte DavisRFM69::numStations = 0;
-volatile uint32_t DavisRFM69::lastDiscStep;
-volatile uint32_t rfm69_mode_counts[COUNT_RF69_MODES] = {};
+volatile byte DavisRFM69::numStations = NUMSTATIONS;
+//volatile uint32_t DavisRFM69::lastDiscStep;
 volatile uint32_t rfm69_mode_timer = 0;
+volatile byte  DavisRFM69::packetIn, DavisRFM69::packetOut, DavisRFM69::qLen;
 
 enum sm_mode DavisRFM69::mode = SM_IDLE;
-PacketFifo DavisRFM69::fifo;
+//PacketFifo DavisRFM69::fifo;
 Station *DavisRFM69::stations;
 DavisRFM69* DavisRFM69::selfPointer;
 
@@ -102,14 +99,7 @@ void DavisRFM69::initialize(byte freqBand) {
 
 	setChannel(0);
 
-	fifo.flush();
 	initStations();
-	lastDiscStep = micros();
-	}
-
-void DavisRFM69::setStations(Station *_stations, byte n) {
-	stations = _stations;
-	numStations = n;
 	}
 
 	/**
@@ -274,7 +264,6 @@ void DavisRFM69::loop() {
 
 	// Handle received packets, called from RFM69 ISR
 void DavisRFM69::handleRadioInt() {
-
 	uint32_t lastRx = micros();
 	uint16_t rxCrc = word(DATA[6], DATA[7]);  // received CRC
 	uint16_t calcCrc = DavisRFM69::crc16_ccitt(DATA, 6);  // calculated CRC
@@ -319,15 +308,16 @@ void DavisRFM69::handleRadioInt() {
 
 		packets++;
 		if (stations[stIx].active) {
-
 			stations[stIx].packets++;
-
-
-
-
-
-
-			fifo.queue((byte*) DATA, CHANNEL, -RSSI, FEI, stations[curStation].lastSeen > 0 ? lastRx - stations[curStation].lastSeen : 0);
+			if (qLen < FIFO_SIZE) {
+				memcpy(&packetFifo[packetIn].packet, (byte*) DATA, DAVIS_PACKET_LEN);
+				packetFifo[packetIn].channel = CHANNEL;
+				packetFifo[packetIn].rssi = -RSSI;
+				packetFifo[packetIn].fei = FEI;
+				packetFifo[packetIn].delta = stations[curStation].lastSeen > 0 ? lastRx - stations[curStation].lastSeen : 0;
+				if (++packetIn == FIFO_SIZE) packetIn = 0;
+				qLen++;
+				}
 			}
 
 #ifdef DAVISRFM69_DEBUG
@@ -401,8 +391,6 @@ void DavisRFM69::interruptHandler() {
 
 		for (byte i = 0; i < DAVIS_PACKET_LEN; i++) DATA[i] = reverseBits(SPI.transfer(0));
 
-		_packetReceived = true;
-
 		handleRadioInt();
 
 		unselect();  // Unselect RFM69 module, enabling interrupts
@@ -452,9 +440,9 @@ void DavisRFM69::setMode(byte newMode) {
 	if (newMode == _mode) return;
 
 #ifdef DAVISRFM69_DEBUG
-		Serial.print(_mode);
-		Serial.print(" -> ");
-		Serial.println(newMode);
+	Serial.print(_mode);
+	Serial.print(" -> ");
+	Serial.println(newMode);
 #endif
 
 	switch (newMode) {
@@ -463,9 +451,6 @@ void DavisRFM69::setMode(byte newMode) {
 				break;
 			case RF69_MODE_RX:
 				writeReg(REG_OPMODE, (readReg(REG_OPMODE) & 0xE3) | RF_OPMODE_RECEIVER);
-				break;
-			case RF69_MODE_SYNTH:
-				writeReg(REG_OPMODE, (readReg(REG_OPMODE) & 0xE3) | RF_OPMODE_SYNTHESIZER);
 				break;
 			case RF69_MODE_STANDBY:
 				writeReg(REG_OPMODE, (readReg(REG_OPMODE) & 0xE3) | RF_OPMODE_STANDBY);
@@ -482,7 +467,6 @@ void DavisRFM69::setMode(byte newMode) {
 void DavisRFM69::isr0() { selfPointer->interruptHandler(); }
 
 void DavisRFM69::receiveBegin() {
-	_packetReceived = false;
 	if (readReg(REG_IRQFLAGS2) & RF_IRQFLAGS2_PAYLOADREADY)
 		writeReg(REG_PACKETCONFIG2, (readReg(REG_PACKETCONFIG2) & 0xFB) | RF_PACKET2_RXRESTART); // avoid RX deadlocks
 

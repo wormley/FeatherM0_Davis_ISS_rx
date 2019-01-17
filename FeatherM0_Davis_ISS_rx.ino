@@ -1,18 +1,15 @@
 // Modified by Jason Foss in 2019 to simplify for use only with Adafruit Feather M0 Radio in Rx Mode.
 
-
 #include <Arduino.h>
 #include <SPI.h>
 
-//#define DAVISRFM69_DEBUG
-
 #include "DavisRFM69.h"
-#include "PacketFifo.h"
+
+DavisRFM69 radio(8, 3, true, 3);
 
 #define LED 13
 #define SERIAL_BAUD 19200
 
-DavisRFM69 radio(8, 3, true, 3);
 
 // id, type, active
 Station stations[1] = {
@@ -30,7 +27,9 @@ void setup() {
 	pinMode(LED, OUTPUT);
 	digitalWrite(LED, LOW);
 
-	radio.setStations(stations, 1);
+	DavisRFM69::stations = stations;
+	DavisRFM69::numStations = 1;
+
 	radio.initialize(FREQ_BAND_US);
 	//radio.setBandwidth(RF69_DAVIS_BW_NARROW);
 	radio.setBandwidth(RF69_DAVIS_BW_WIDE);
@@ -39,7 +38,7 @@ void setup() {
 	}
 
 void loop() {
-	if (radio.fifo.hasElements()) decode_packet(radio.fifo.dequeue());
+	if (radio.qLen > 0) decode_packet();
 	if (radio.mode == SM_RECEIVING)	digitalWrite(LED, HIGH);
 	else if (radio.mode == SM_SEARCHING) {
 		Blink(LED, 15);
@@ -76,11 +75,15 @@ void print_value(char* vname, uint32_t value, const __FlashStringHelper* sep) {
 	Serial.print(vname); Serial.print(F(":")); Serial.print(value); Serial.print(sep);
 	}
 
-void decode_packet(RadioData* rd) {
+void decode_packet() {
+	radio.qLen--;
+	RadioData* rd = &radio.packetFifo[radio.packetOut];
+	byte* packet = rd->packet;
+	if (++radio.packetOut == FIFO_SIZE) radio.packetOut = 0;
+
 
   // for more about the protocol see:
   // https://github.com/dekay/DavisRFM69/wiki/Message-Protocol
-	byte* packet = rd->packet;
 
 #ifdef DAVISRFM69_DEBUG
 	Serial.print(F("raw:"));
