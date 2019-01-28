@@ -16,16 +16,34 @@
 
 //#define DAVISRFM69_DEBUG
 
-
 #ifndef DAVISRFM69_h
 #define DAVISRFM69_h
 
-#define RecieverID     0		// Allow for more than one Rx sending data at a time.
+// Davis VP2 standalone station types
+#define STYPE_ISS         0x0 // ISS
+#define STYPE_TEMP_ONLY   0x1 // Temperature Only Station
+#define STYPE_HUM_ONLY    0x2 // Humidity Only Station
+#define STYPE_TEMP_HUM    0x3 // Temperature/Humidity Station
+#define STYPE_WLESS_ANEMO 0x4 // Wireless Anemometer Station
+#define STYPE_RAIN        0x5 // Rain Station
+#define STYPE_LEAF        0x6 // Leaf Station
+#define STYPE_SOIL        0x7 // Soil Station
+#define STYPE_SOIL_LEAF   0x8 // Soil/Leaf Station
+#define STYPE_SENSORLINK  0x9 // SensorLink Station (not supported for the VP2)
+#define STYPE_OFF         0xA // No station OFF
+#define STYPE_VUE         0x10 // pseudo station type for the Vue ISS
+							   // since the Vue also has a type of 0x0
+
+#define ISS_TYPE	STYPE_ISS // Change to STYPE_VUE to correctly display wind for VUE
+
+#define LED 13
+#define SERIAL_BAUD 115200
+#define SPI_CS          8 // SS is the SPI slave select pin, for instance D10 on atmega328
+#define RF69_IRQ_PIN    3
+#define RF69_IRQ_NUM    3
+
 #define NUMSTATIONS			  1
 #define DAVIS_PACKET_LEN     10 // ISS has fixed packet lengths of eight bytes including CRC and two bytes trailing repeater info
-#define SPI_CS               SS // SS is the SPI slave select pin, for instance D10 on atmega328
-#define RF69_IRQ_PIN 3
-#define RF69_IRQ_NUM 3
 
 #define RF69_MODE_SLEEP       0 // XTAL OFF
 #define RF69_MODE_STANDBY     1 // XTAL ON
@@ -37,15 +55,12 @@
 #define RF69_DAVIS_BW_WIDE    2
 
 #define RESYNC_THRESHOLD	 49 // max. number of lost packets from a station before rediscovery
-#define LATE_PACKET_THRESH 15000 // packet is considered missing after this many micros
-#define MAX_STATIONS 8          // max. stations this code is able to handle
+#define LATE_PACKET_THRESH 5000 // packet is considered missing after this many micros
 
-#define TUNEIN_USEC		 20000L // 10 milliseconds, amount of time before an expect TX to tune the radio in.	    							
+#define TUNEIN_USEC		 10000L // 10 milliseconds, amount of time before an expect TX to tune the radio in.	    							
 								// this includes possible radio turnaround tx->rx or sleep->rx transitions
 								// 10 ms is reliable, should be able to get this faster but
 								// the loop is polled, so slow loop calls will cause missed packets
-								//
-								//Increased from 10000 to 15000 by JF
 
 #define DISCOVERY_STEP   150000000L	// 150 seconds
 #define FIFO_SIZE			8
@@ -68,21 +83,6 @@
 
 #define RF_AFCLOWBETA_ON   0x20
 #define RF_AFCLOWBETA_OFF  0x00 // Default
-
-// Davis VP2 standalone station types
-#define STYPE_ISS         0x0 // ISS
-#define STYPE_TEMP_ONLY   0x1 // Temperature Only Station
-#define STYPE_HUM_ONLY    0x2 // Humidity Only Station
-#define STYPE_TEMP_HUM    0x3 // Temperature/Humidity Station
-#define STYPE_WLESS_ANEMO 0x4 // Wireless Anemometer Station
-#define STYPE_RAIN        0x5 // Rain Station
-#define STYPE_LEAF        0x6 // Leaf Station
-#define STYPE_SOIL        0x7 // Soil Station
-#define STYPE_SOIL_LEAF   0x8 // Soil/Leaf Station
-#define STYPE_SENSORLINK  0x9 // SensorLink Station (not supported for the VP2)
-#define STYPE_OFF         0xA // No station OFF
-#define STYPE_VUE         0x10 // pseudo station type for the Vue ISS
-							   // since the Vue also has a type of 0x0
 
 // Below are known, publicly documented packet types for the VP2 and the Vue.
 
@@ -132,19 +132,19 @@ typedef struct __attribute__((packed)) Station {
 
 typedef struct __attribute__((packed)) WxData {
 	byte rain = 0;
-	int rainrate = -1;
-	float rh = 0.0;
-	short soilleaf = -1;
-	float solar = 0.00;
-	float temp = 0.0;
-	short uv = -1;
-	float vcap = -1;
-	float vsolar = -1;
-	short windd = - 1;
-	short winddraw = -1;
-	short windgust = -1;
+	uint16_t rainrate = 0;
+	uint16_t rh = 0;
+	int16_t soilleaf = -1;
+	float solar = -1;
+	int16_t temp = 0;
+	float uv = -1;
+	int16_t vcap = -1;
+	int16_t vsolar = -1;
+	uint16_t windd = 0;
+	uint8_t winddraw = 0;
+	uint8_t windgust = 0;
 	byte windgustd = 0;
-	short windv = -1;
+	uint16_t windv = 0;
 	};
 
 struct __attribute__((packed)) RadioData {
@@ -165,22 +165,21 @@ public:
 	static enum sm_mode mode;
 	static Station *stations;
 
-	DavisRFM69(byte slaveSelectPin = SPI_CS, byte interruptPin = RF69_IRQ_PIN, bool isRFM69HW = false, byte interruptNum = RF69_IRQ_NUM) {
+	DavisRFM69(byte slaveSelectPin, byte interruptPin, byte interruptNum) {
 		_slaveSelectPin = slaveSelectPin;
 		_interruptPin = interruptPin;
 		_interruptNum = interruptNum;
 		_mode = RF69_MODE_STANDBY;
-		_isRFM69HW = isRFM69HW;
 		}
 
 	void initialize(byte freqBand);
 	void setBandwidth(byte bw);
-	void loop(); // like handleRadioInt but for systems that want to poll rather than run a hardware timer to tick the radio system.
+	void loop();
 
 protected:
 	static volatile byte packetIn;
-	static volatile byte DATA[DAVIS_PACKET_LEN];  // recv/xmit buf, including header, CRC, and RSSI value
-	static volatile byte _mode; //should be protected?
+	static volatile byte DATA[DAVIS_PACKET_LEN];
+	static volatile byte _mode;
 	static volatile byte CHANNEL;
 	static volatile int RSSI;
 	static volatile int16_t FEI;
@@ -195,24 +194,20 @@ protected:
 	byte _slaveSelectPin;
 	byte _interruptPin;
 	byte _interruptNum;
-	bool _isRFM69HW;
 
 	void setChannel(byte channel);
 	static uint16_t crc16_ccitt(volatile byte *buf, byte len, uint16_t initCrc = 0);
-	int readRSSI();
 	byte readReg(byte addr);
 	void writeReg(byte addr, byte val);
 	byte nextChannel(byte channel);
 	int findStation(byte id);
 	void handleRadioInt();
 	uint32_t difftime(uint32_t after, uint32_t before);
-	void initStations();
 	void nextStation();
 	void(*userInterrupt)();
 	void virtual interruptHandler();
 	byte reverseBits(byte b);
 	static void isr0();
-	void receiveBegin();
 	void setMode(byte mode);
 	void select();
 	void unselect();

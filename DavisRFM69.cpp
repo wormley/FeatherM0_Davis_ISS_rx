@@ -40,6 +40,9 @@ volatile byte DavisRFM69::numStations = NUMSTATIONS;
 volatile uint32_t rfm69_mode_timer = 0;
 volatile byte  DavisRFM69::packetIn, DavisRFM69::packetOut, DavisRFM69::qLen;
 
+int freeMemory();
+
+
 enum sm_mode DavisRFM69::mode = SM_IDLE;
 //PacketFifo DavisRFM69::fifo;
 Station *DavisRFM69::stations;
@@ -62,7 +65,7 @@ void DavisRFM69::initialize(byte freqBand) {
 		/* 0x1E */ { REG_AFCFEI, RF_AFCFEI_AFCAUTOCLEAR_OFF | RF_AFCFEI_AFCAUTO_ON },
 		/* 0x25 */ { REG_DIOMAPPING1, RF_DIOMAPPING1_DIO0_01 }, //DIO0 is the only IRQ we're using
 		/* 0x28 */ { REG_IRQFLAGS2, RF_IRQFLAGS2_FIFOOVERRUN }, // Reset the FIFOs. Fixes a problem I had with bad first packet.
-		/* 0x29 */ { REG_RSSITHRESH, 190 }, // real dBm = -(REG_RSSITHRESH / 2) -> 190 raw = -95 dBm
+		/* 0x29 */ { REG_RSSITHRESH, 200 }, // real dBm = -(REG_RSSITHRESH / 2) -> 190 raw = -95 dBm
 		/* 0x2d */ { REG_PREAMBLELSB, 0x4 }, // Davis has four preamble bytes 0xAAAAAAAA -- use 6 for TX for this setup
 		/* 0x2e */ { REG_SYNCCONFIG, RF_SYNC_ON | RF_SYNC_FIFOFILL_AUTO | RF_SYNC_SIZE_2 | RF_SYNC_TOL_2 },  // Allow a couple erros in the sync word
 		/* 0x2f */ { REG_SYNCVALUE1, 0xcb }, // Davis ISS first sync byte. http://madscientistlabs.blogspot.ca/2012/03/first-you-get-sugar.html
@@ -70,7 +73,7 @@ void DavisRFM69::initialize(byte freqBand) {
 		/* 0x37 */ { REG_PACKETCONFIG1, RF_PACKET1_FORMAT_FIXED | RF_PACKET1_DCFREE_OFF | RF_PACKET1_CRC_OFF | RF_PACKET1_CRCAUTOCLEAR_OFF | RF_PACKET1_ADRSFILTERING_OFF }, // Fixed packet length and we'll check our own CRC
 		/* 0x38 */ { REG_PAYLOADLENGTH, DAVIS_PACKET_LEN }, // Davis sends 8 bytes of payload, including CRC that we check manually.
 		/* 0x3c */ { REG_FIFOTHRESH, RF_FIFOTHRESH_TXSTART_FIFOTHRESH | 0x07 }, // TX on FIFO having more than seven bytes
-		/* 0x3d */ { REG_PACKETCONFIG2, RF_PACKET2_RXRESTARTDELAY_2BITS | RF_PACKET2_AUTORXRESTART_ON | RF_PACKET2_AES_OFF }, //RXRESTARTDELAY must match transmitter PA ramp-down time (bitrate dependent)
+		/* 0x3d */ { REG_PACKETCONFIG2, RF_PACKET2_RXRESTARTDELAY_1BIT | RF_PACKET2_AUTORXRESTART_ON | RF_PACKET2_AES_OFF }, //RXRESTARTDELAY must match transmitter PA ramp-down time (bitrate dependent)
 		/* 0x6F */ { REG_TESTDAGC, RF_DAGC_IMPROVED_LOWBETA0 }, // // TODO: Should use LOWBETA_ON, but having trouble getting it working
 		/* 0x71 */ { REG_TESTAFC, 0 }, // AFC Offset for low mod index systems
 		{255, 0}
@@ -92,14 +95,19 @@ void DavisRFM69::initialize(byte freqBand) {
 
 	selfPointer = this;
 	userInterrupt = NULL;
-
 	mode = SM_IDLE;
-
 	band = freqBand;
-
 	setChannel(0);
-
-	initStations();
+	for (byte i = 0; i < NUMSTATIONS; i++) {
+		stations[i].channel = 0;
+		stations[i].lastRx = 0;
+		stations[i].interval = 0;
+		stations[i].lostPackets = 0;
+		stations[i].lastRx = 0;
+		stations[i].lastSeen = 0;
+		stations[i].packets = 0;
+		stations[i].syncBegan = 0;
+		}
 	}
 
 	/**
@@ -110,10 +118,8 @@ uint32_t DavisRFM69::difftime(uint32_t after, uint32_t before) {
 	if (after >= before) {
 		return after - before;
 		}
-	else {
 	 // counter wrapped
-		return (0xffffffff - before) + after + 1;
-		}
+	return (0xffffffff - before) + after + 1;
 	}
 
 	/**
@@ -195,7 +201,7 @@ void DavisRFM69::loop() {
 		// any stations not synchronized, turn on the receiver and
 		// hope we get lucky.
 	bool all_sync = true;
-	for (i = 0; i < numStations; i++) {
+	for (i = 0; i < NUMSTATIONS; i++) {
 	  // unknown stations will have interval of zero, the radio interrupt will
 	  // fill this in if we receive a packet from the given station.
 		if (stations[i].interval == 0) {
@@ -240,6 +246,7 @@ void DavisRFM69::loop() {
 					Serial.print(p);
 					Serial.println("\%");
 					stations[i].progress = p;
+					Serial.println(freeMemory());									// Added by JF
 					}
 #endif
 				break;
@@ -367,32 +374,17 @@ int DavisRFM69::findStation(byte id) {
 	return -1;
 	}
 
-	// Reset station array to safe defaults
-void DavisRFM69::initStations() {
-	for (byte i = 0; i < numStations; i++) {
-		stations[i].channel = 0;
-		stations[i].lastRx = 0;
-		stations[i].interval = 0;
-		stations[i].lostPackets = 0;
-		stations[i].lastRx = 0;
-		stations[i].lastSeen = 0;
-		stations[i].packets = 0;
-		stations[i].syncBegan = 0;
-		}
-	}
-
 void DavisRFM69::interruptHandler() {
-	RSSI = readRSSI();  // Read up front when it is most likely the carrier is still up
+	RSSI = (-readReg(REG_RSSIVALUE)) >> 1;  // Read up front when it is most likely the carrier is still up
 	if (_mode == RF69_MODE_RX && (readReg(REG_IRQFLAGS2) & RF_IRQFLAGS2_PAYLOADREADY)) {
 		FEI = word(readReg(REG_FEIMSB), readReg(REG_FEILSB));
 		setMode(RF69_MODE_STANDBY);
+
 		select();   // Select RFM69 module, disabling interrupts
 		SPI.transfer(REG_FIFO & 0x7f);
-
-		for (byte i = 0; i < DAVIS_PACKET_LEN; i++) DATA[i] = reverseBits(SPI.transfer(0));
-
+		for (byte i = 0; i < DAVIS_PACKET_LEN; i++)
+			DATA[i] = reverseBits(SPI.transfer(0));
 		handleRadioInt();
-
 		unselect();  // Unselect RFM69 module, enabling interrupts
 		}
 	}
@@ -409,7 +401,10 @@ void DavisRFM69::setChannel(byte channel) {
 	writeReg(REG_FRFMSB, pgm_read_byte(&bandTab[band][CHANNEL][0]));
 	writeReg(REG_FRFMID, pgm_read_byte(&bandTab[band][CHANNEL][1]));
 	writeReg(REG_FRFLSB, pgm_read_byte(&bandTab[band][CHANNEL][2]));
-	receiveBegin();
+
+	if (readReg(REG_IRQFLAGS2) & RF_IRQFLAGS2_PAYLOADREADY)
+		writeReg(REG_PACKETCONFIG2, (readReg(REG_PACKETCONFIG2) & 0xFB) | RF_PACKET2_RXRESTART); // avoid RX deadlocks
+	setMode(RF69_MODE_RX);
 	}
 
 	// The data bytes come over the air from the ISS least significant bit first. Fix them as we go. From
@@ -456,8 +451,8 @@ void DavisRFM69::setMode(byte newMode) {
 				writeReg(REG_OPMODE, (readReg(REG_OPMODE) & 0xE3) | RF_OPMODE_STANDBY);
 				break;
 			case RF69_MODE_SLEEP:
-				writeReg(REG_OPMODE, (readReg(REG_OPMODE) & 0xE3) | RF_OPMODE_STANDBY);		// Changed by JF from RF_OPMODE_SLEEP to RF_OPMODE_STANDBY
-																							// greatly reducing missed packets
+				writeReg(REG_OPMODE, (readReg(REG_OPMODE) & 0xE3) | RF_OPMODE_STANDBY);		// Changed from RF_OPMODE_SLEEP to RF_OPMODE_STANDBY
+																							// Caused missed packets   JF
 				break;
 			default: return;
 		}
@@ -465,21 +460,6 @@ void DavisRFM69::setMode(byte newMode) {
 	}
 
 void DavisRFM69::isr0() { selfPointer->interruptHandler(); }
-
-void DavisRFM69::receiveBegin() {
-	if (readReg(REG_IRQFLAGS2) & RF_IRQFLAGS2_PAYLOADREADY)
-		writeReg(REG_PACKETCONFIG2, (readReg(REG_PACKETCONFIG2) & 0xFB) | RF_PACKET2_RXRESTART); // avoid RX deadlocks
-
-	writeReg(REG_DIOMAPPING1, RF_DIOMAPPING1_DIO0_01); //set DIO0 to "PAYLOADREADY" in receive mode
-	setMode(RF69_MODE_RX);
-	}
-
-int DavisRFM69::readRSSI() {
-	int rssi = 0;
-	rssi = -readReg(REG_RSSIVALUE);
-	rssi >>= 1;
-	return rssi;
-	}
 
 byte DavisRFM69::readReg(byte addr) {
 	select();

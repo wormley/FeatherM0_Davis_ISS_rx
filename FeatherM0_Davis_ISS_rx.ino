@@ -4,21 +4,25 @@
 #include <SPI.h>
 
 #include "DavisRFM69.h"
+#include "RFM69registers.h"
 
-DavisRFM69 radio(8, 3, true, 3);
+DavisRFM69 radio(SPI_CS,RF69_IRQ_PIN,RF69_IRQ_NUM);
 
-#define LED 13
-#define SERIAL_BAUD 19200
-
-
-// id, type, active
-Station stations[1] = {
-  {.id = 0,
-	.type = STYPE_ISS,
-	.active = true}
-	};
+Station stations[1] = { { .id = 0, .type = ISS_TYPE, .active = true } }; 
 
 WxData curWx;
+
+//  Report the amount of memory between the heap and the stack. Call freeMemory() to get the amount at that point.
+//  From: https://github.com/mpflaga/Arduino-MemoryFree				 Added by JF
+
+#ifdef DAVISRFM69_DEBUG
+extern "C" char* sbrk(int incr);
+
+int freeMemory() {
+  char top;
+  return &top - reinterpret_cast<char*>(sbrk(0));
+}
+#endif
 
 void setup() {
 	Serial.begin(SERIAL_BAUD);
@@ -111,9 +115,9 @@ void decode_packet() {
 
 	// wind data is present in every packet, windd == 0 (packet[2] == 0) means there's no anemometer
 	if (packet[2] != 0) {
-		if (stations[packet[0] & 0x7].type == STYPE_VUE) curWx.windd = round(((packet[2] << 1) | (packet[4] & 2) >> 1) * 360 / 512);
+		if (stations[packet[0] & 0x7].type == STYPE_VUE) curWx.windd = round(((packet[2] << 1) | (packet[4] & 2) >> 1) * 0.703125);
 		else {
-			curWx.windd = 9 + round((packet[2] - 1) * (342.0 / 255.0));
+			curWx.windd = 9 + round((packet[2] - 1) * 1.341176);
 			if (curWx.windd > 345) curWx.windd = ((curWx.windd - 345) * 2) + 345;			// Smooths out some of the dead zone around N similiar to console   JF
 			}
 		}
@@ -159,25 +163,15 @@ void decode_packet() {
 				break;
 
 			case VP2P_RAINSECS:
-			  // light rain:  byte4[5:4] as value[9:8] and byte3[7:0] as value[7:0] - 10 bits total
-			  // strong rain: byte4[5:4] as value[5:4] and byte3[7:4] as value[3:0] - 6 bits total
-
-
-//				if ((packet[4] && 0x40) == 0) {			// light rain
-	//				fval = ((packet[4] && 0x30) / 16 * 250) + packet[3];
-//					}
-//				else if ((packet[4] && 0x40) == 0x40) {			// strong rain
-//					fval = 11520 / (((packet[4] && 0x30) / 16 * 250) + packet[3]);
-//					}
-//				else {
-//					fval = -1;
-//					}
-				
-
+				// Seconds between last 2 tips or since last tip, whichever is greater
+				// light rain:  byte4[5:4] as value[9:8] and byte3[7:0] as value[7:0] - 10 bits total
+				// strong rain: byte4[5:4] as value[5:4] and byte3[7:4] as value[3:0] - 6 bits total
+				// packet[4] bit 6: strong == 0, light == 1
 
 				curWx.rainrate = (packet[4] & 0x30) << 4 | packet[3];
-				if (curWx.rainrate == 0x3ff) curWx.rainrate = -1;
-				else if ((packet[4] & 0x40) == 0) curWx.rainrate >>= 4; // packet[4] bit 6: strong == 0, light == 1
+				if (curWx.rainrate == 0x3ff) curWx.rainrate = 0;
+				else if ((packet[4] & 0x40) == 0) curWx.rainrate >>= 4;
+				curWx.rainrate = round(3600.0 / curWx.rainrate); // Equals 0.01"/hr
 				
 #ifdef DAVISRFM69_DEBUG
 				print_value("rainsecs", curWx.rainrate, F(", "));
@@ -185,7 +179,7 @@ void decode_packet() {
 				break;
 
 			case VP2P_TEMP:
-				curWx.temp = (((int16_t) ((packet[3] << 8) | packet[4])) / 16) / 10.0;
+				curWx.temp = (((int16_t) ((packet[3] << 8) | packet[4])) / 16);
 				
 #ifdef DAVISRFM69_DEBUG
 				print_value("temp", curWx.temp, F(", "));
@@ -193,7 +187,7 @@ void decode_packet() {
 				break;
 
 			case VP2P_HUMIDITY:
-				curWx.rh = ((packet[4] >> 4) << 8 | packet[3]) / 10.0; // 0 -> no sensor
+				curWx.rh = ((packet[4] >> 4) << 8 | packet[3]); // 1/10ths
 
 #ifdef DAVISRFM69_DEBUG
 				print_value("rh", curWx.rh, F(", "));
@@ -221,7 +215,7 @@ void decode_packet() {
 				break;
 
 			case VUEP_VCAP:
-				curWx.vcap = ((packet[3] << 2) | (packet[4] & 0xc0) >> 6) / 100.0;
+				curWx.vcap = ((packet[3] << 2) | (packet[4] & 0xc0) >> 6); // 1/100ths
 
 #ifdef DAVISRFM69_DEBUG
 				print_value("vcap", curWx.vcap, F(", "));
@@ -229,7 +223,7 @@ void decode_packet() {
 				break;
 
 			case VUEP_VSOLAR:
-				curWx.vsolar = ((packet[3] << 2) | (packet[4] & 0xc0) >> 6) / 100.0;
+				curWx.vsolar = ((packet[3] << 2) | (packet[4] & 0xc0) >> 6); // 1/100ths
 
 #ifdef DAVISRFM69_DEBUG
 				print_value("vsolar", curWx.vsolar, F(", "));
@@ -238,10 +232,11 @@ void decode_packet() {
 
 
 #ifdef DAVISRFM69_DEBUG
-	int diff = rd->delta - stations[packet[0] & 0x7].interval;									// Added by JF
+	int diff = rd->delta - stations[packet[0] & 0x7].interval;					// Added by JF
 	print_value("fei", round(rd->fei * 61.03515625 / 1000), F(", "));
 	print_value("delta", rd->delta, F(", "));
-	print_value("diff", diff, F(""));
+	print_value("diff", diff, F(", "));
+	Serial.print(freeMemory());													// Added by JF
 	Serial.println();
 #endif
 
@@ -250,8 +245,6 @@ void decode_packet() {
 
 
 	Serial.print("c:");
-	Serial.print(RecieverID);
-	Serial.print(",");
 	Serial.print(radio.packets + radio.lostPackets);
 	Serial.print(",");
 	Serial.print((float) (radio.packets * 100.0 / (radio.packets + radio.lostPackets)));
