@@ -1,12 +1,29 @@
+More changes:
+Add more debugging
+Change AFC mode to be one-shot to not accidentally correct one station
+over another.
+Fix 'numStations' to properly handle multiple stations
+Add 'volatile' to the enum for mode to reduce race condition
+Add additional mode check to further reduce race condition
+Move frequency lists into new .h to reduce compiler warnings
+Fix difftime() to better handle cases when we were delayed too
+long. Need more fixes still.(Original code would just hang for
+hours)
+Increase default pre-tune time since hop time is for the
+end of transmission.
+Reduce wasted time in loop() so the first station discovered
+is not lost while searching for additional stations
+Fix more compiler warnings in print_value()
+Added monitoring of incoming serial data for hotkeys
+added 'r' hotkey to reset device
 
-Removed unneeded code
+Forked from: https://github.com/jlf001/FeatherM0_Davis_ISS_rx/
 
-Increased accuracy (Now losing less than 5% of packets versus 90%) 
+To add stations the only change needed is the array in the .ino file,
+numStations is automatically computed based on the size of the array.
 
-Other changes
+Working with 2 stations now somewhat reliably.
 
-
-Forked from https://github.com/HydroSense/FeatherM0_Davis_ISS_rx
 
 Intro
 -----
