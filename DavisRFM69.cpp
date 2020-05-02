@@ -18,9 +18,11 @@
 
 #include <Arduino.h>            //assumes Arduino IDE v1.0 or greater
 #include <SPI.h>
+#define DavisRFM69_local
 
 #include "RFM69registers.h"
 #include "DavisRFM69.h"
+#include "DavisRFM69_frequencies.h"
 
 volatile byte  DavisRFM69::DATA[DAVIS_PACKET_LEN];
 volatile byte DavisRFM69::_mode = RF69_MODE_INIT;       // current transceiver state
@@ -43,7 +45,7 @@ volatile byte  DavisRFM69::packetIn, DavisRFM69::packetOut, DavisRFM69::qLen;
 int freeMemory();
 
 
-enum sm_mode DavisRFM69::mode = SM_IDLE;
+volatile enum sm_mode DavisRFM69::mode = SM_IDLE;
 //PacketFifo DavisRFM69::fifo;
 Station *DavisRFM69::stations;
 DavisRFM69* DavisRFM69::selfPointer;
@@ -62,10 +64,10 @@ void DavisRFM69::initialize(byte freqBand) {
 		/* 0x18 */ { REG_LNA, RF_LNA_ZIN_50 | RF_LNA_GAINSELECT_AUTO }, // Not sure which is correct!
 		/* 0x19 */ { REG_RXBW, RF_RXBW_DCCFREQ_010 | RF_RXBW_MANT_20 | RF_RXBW_EXP_4 }, // Use 25 kHz BW (BitRate < 2 * RxBw)
 		/* 0x1A */ { REG_AFCBW, RF_RXBW_DCCFREQ_010 | RF_RXBW_MANT_20 | RF_RXBW_EXP_3 }, // Use double the bandwidth during AFC as reception
-		/* 0x1E */ { REG_AFCFEI, RF_AFCFEI_AFCAUTOCLEAR_OFF | RF_AFCFEI_AFCAUTO_ON },
+		/* 0x1E */ { REG_AFCFEI, RF_AFCFEI_AFCAUTOCLEAR_ON | RF_AFCFEI_AFCAUTO_ON },
 		/* 0x25 */ { REG_DIOMAPPING1, RF_DIOMAPPING1_DIO0_01 }, //DIO0 is the only IRQ we're using
 		/* 0x28 */ { REG_IRQFLAGS2, RF_IRQFLAGS2_FIFOOVERRUN }, // Reset the FIFOs. Fixes a problem I had with bad first packet.
-		/* 0x29 */ { REG_RSSITHRESH, 200 }, // real dBm = -(REG_RSSITHRESH / 2) -> 190 raw = -95 dBm
+		/* 0x29 */ { REG_RSSITHRESH, 150 }, // real dBm = -(REG_RSSITHRESH / 2) -> 190 raw = -95 dBm
 		/* 0x2d */ { REG_PREAMBLELSB, 0x4 }, // Davis has four preamble bytes 0xAAAAAAAA -- use 6 for TX for this setup
 		/* 0x2e */ { REG_SYNCCONFIG, RF_SYNC_ON | RF_SYNC_FIFOFILL_AUTO | RF_SYNC_SIZE_2 | RF_SYNC_TOL_2 },  // Allow a couple erros in the sync word
 		/* 0x2f */ { REG_SYNCVALUE1, 0xcb }, // Davis ISS first sync byte. http://madscientistlabs.blogspot.ca/2012/03/first-you-get-sugar.html
@@ -98,7 +100,7 @@ void DavisRFM69::initialize(byte freqBand) {
 	mode = SM_IDLE;
 	band = freqBand;
 	setChannel(0);
-	for (byte i = 0; i < NUMSTATIONS; i++) {
+	for (byte i = 0; i < numStations; i++) {
 		stations[i].channel = 0;
 		stations[i].lastRx = 0;
 		stations[i].interval = 0;
@@ -115,7 +117,8 @@ void DavisRFM69::initialize(byte freqBand) {
 	 * happend after the second. (ie accounting for wrap around).
 	 */
 uint32_t DavisRFM69::difftime(uint32_t after, uint32_t before) {
-	if (after >= before) {
+	if (after >= before || !(after < 0x8fffffff  && before >0x8fffffff) ) {
+		if (after< before) return 0;
 		return after - before;
 		}
 	 // counter wrapped
@@ -133,7 +136,8 @@ void DavisRFM69::loop() {
 	// first see if we have tuned into receive a station previously and failed to actually receive a packet
 	if (mode == SM_RECEIVING) {
 	  // packet was lost
-		if (difftime(micros(), stations[curStation].recvBegan) > (1 + stations[curStation].lostPackets)*(LATE_PACKET_THRESH + TUNEIN_USEC)) {
+		if (difftime(micros(), stations[curStation].recvBegan) > (1 + stations[curStation].lostPackets)*(LATE_PACKET_THRESH + TUNEIN_USEC)
+		&& mode == SM_RECEIVING ) {
 #ifdef DAVISRFM69_DEBUG
 			Serial.print(micros());
 			Serial.print(": missed packet from station ");
@@ -143,8 +147,9 @@ void DavisRFM69::loop() {
 #endif
 			lostPackets++;
 			stations[curStation].lostPackets++;
-			stations[curStation].lastRx += stations[curStation].interval;
-			stations[curStation].channel = nextChannel(stations[curStation].channel);
+				stations[curStation].lastRx += stations[curStation].interval;
+			    stations[curStation].channel = nextChannel(stations[curStation].channel);
+			
 
 			// lost a station
 			if (stations[curStation].lostPackets > RESYNC_THRESHOLD) {
@@ -164,7 +169,7 @@ void DavisRFM69::loop() {
 			curStation = -1;
 			mode = SM_IDLE;
 			setMode(RF69_MODE_STANDBY);
-			}
+		}
 		else {
 	   // waiting to receive and it hasn't timed out yet.
 	   // do nothing.
@@ -177,9 +182,25 @@ void DavisRFM69::loop() {
 	for (i = 0; i < numStations; i++) {
 	  // interval is filled in once we discover a station
 		if (stations[i].interval > 0) {
-			if (difftime(stations[i].lastRx + stations[i].interval, micros()) < ((1 + stations[i].lostPackets)*TUNEIN_USEC)) {
+#ifdef DAVISRFM69_DEBUG_VERBOSE
+				Serial.print(micros());
+				Serial.print(" ");
+				Serial.print(stations[i].lastRx);
+				Serial.print(" ");
+				Serial.println(difftime(stations[i].lastRx + stations[i].interval,micros()));
+				Serial.print("id ");
+				Serial.print(stations[i].id);
+				Serial.print(" channel ");
+				Serial.println(stations[i].channel);
+#endif
+
+			if (difftime(stations[i].lastRx + stations[i].interval,micros()) < ((1 + stations[i].lostPackets)*TUNEIN_USEC)) {
 #ifdef DAVISRFM69_DEBUG
 				Serial.print(micros());
+				Serial.print(" ");
+				Serial.print(stations[i].lastRx);
+				Serial.print(" ");
+				Serial.println(difftime(stations[i].lastRx + stations[i].interval,micros()));
 				Serial.print(": tune to station ");
 				Serial.print(stations[i].id);
 				Serial.print(" channel ");
@@ -201,7 +222,7 @@ void DavisRFM69::loop() {
 		// any stations not synchronized, turn on the receiver and
 		// hope we get lucky.
 	bool all_sync = true;
-	for (i = 0; i < NUMSTATIONS; i++) {
+	for (i = 0; i < numStations; i++) {
 	  // unknown stations will have interval of zero, the radio interrupt will
 	  // fill this in if we receive a packet from the given station.
 		if (stations[i].interval == 0) {
@@ -236,7 +257,10 @@ void DavisRFM69::loop() {
 				setChannel(stations[i].channel);
 				}
 			else {
+				if (CHANNEL != stations[i].channel) setChannel(stations[i].channel);
 			 // we're waiting to hear from this station, don't tune away!
+			 setMode(RF69_MODE_RX);
+
 #ifdef DAVISRFM69_DEBUG
 				byte p = difftime(micros(), stations[i].syncBegan) / (DISCOVERY_STEP / 100);
 
@@ -301,7 +325,11 @@ void DavisRFM69::handleRadioInt() {
 			}
 
 		if (stationsFound < numStations && stations[stIx].interval == 0) {
-			stations[stIx].interval = (41 + id) * 1000000 / 16; // Davis' official tx interval in us
+			stations[stIx].interval = ((41 + id) * 1000000 / 16) ;
+			//-(1000000* ((10+2+4)*8/19200)) ; 
+			// Davis' official tx interval in us minus packet length
+			// We don't get signaled till the end of the packet, hopping is from
+			// start to start (4 preamble, 2 sync, 10 data at 19200 symbol/second(bits))
 
 			stationsFound++;
 #ifdef DAVISRFM69_DEBUG

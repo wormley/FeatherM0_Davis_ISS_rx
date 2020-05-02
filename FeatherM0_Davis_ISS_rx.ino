@@ -5,10 +5,28 @@
 
 #include "DavisRFM69.h"
 #include "RFM69registers.h"
+#include <Wire.h>
+#include <SparkFunBME280.h>
+#include <math.h>
 
+#define BME_DEBUG
+
+BME280 mySensor;
+boolean bme_valid = false;
 DavisRFM69 radio(SPI_CS,RF69_IRQ_PIN,RF69_IRQ_NUM);
+unsigned long time=0;
+int bme_loop = 0;
+float temperature=NAN;
+float pressure=NAN;
+float humidity=NAN;
 
-Station stations[1] = { { .id = 0, .type = ISS_TYPE, .active = true } }; 
+
+#define BME_DELAY 2000
+
+Station stations[2] = { 
+	{ .id = 0, .type = ISS_TYPE, .active = true },
+	{ .id = 2, .type = ISS_TYPE, .active = true }
+ }; 
 
 WxData curWx;
 
@@ -24,32 +42,42 @@ int freeMemory() {
 }
 #endif
 
+void bme_setup() {
+	  mySensor.setFilter(2); //0 to 4 is valid. Filter coefficient. See 3.4.4
+  mySensor.setStandbyTime(4); //0 to 7 valid. Time between readings. See table 27.
+
+  mySensor.setTempOverSample(4); //0 to 16 are valid. 0 disables temp sensing. See table 24.
+  mySensor.setPressureOverSample(4); //0 to 16 are valid. 0 disables pressure sensing. See table 23.
+  mySensor.setHumidityOverSample(4); //0 to 16 are valid. 0 disables humidity sensing. See table 19.
+  
+  mySensor.setMode(MODE_NORMAL); //MODE_SLEEP, MODE_FORCED, MODE_NORMAL is valid. See 3.3
+}
+
+
 void setup() {
 	Serial.begin(SERIAL_BAUD);
-	delay(1000);
+// Give us time to get to the serial port
+	delay(5000);
 
 	pinMode(LED, OUTPUT);
 	digitalWrite(LED, LOW);
 
 	DavisRFM69::stations = stations;
-	DavisRFM69::numStations = 1;
+	DavisRFM69::numStations = sizeof(stations)/sizeof(Station);
 
 	radio.initialize(FREQ_BAND_US);
 	//radio.setBandwidth(RF69_DAVIS_BW_NARROW);
 	radio.setBandwidth(RF69_DAVIS_BW_WIDE);
+//	mySensor.setI2CAddress(0x76);
+//  if (mySensor.beginI2C() == false)  {
+//        Serial.println("Could not find a valid BME280 sensor, check wiring!");
+//  } else {
+//	  bme_valid = true;
+//	bme_setup();
+//  }
+ 
 
 	Serial.println("Boot complete!");
-	}
-
-void loop() {
-	if (radio.qLen > 0) decode_packet();
-	if (radio.mode == SM_RECEIVING)	digitalWrite(LED, HIGH);
-	else if (radio.mode == SM_SEARCHING) {
-		Blink(LED, 15);
-		delay(100);
-		}
-	else digitalWrite(LED, LOW);
-	radio.loop();
 	}
 
 void Blink(byte PIN, int DELAY_MS) {
@@ -58,24 +86,31 @@ void Blink(byte PIN, int DELAY_MS) {
 	delay(DELAY_MS);
 	digitalWrite(PIN, LOW);
 	}
+boolean led_state=false;
+void Toggle_LED() {
+	led_state = !led_state;
+	pinMode(LED, OUTPUT);
+	digitalWrite(LED, led_state);
+	}
 
-void print_value(char* vname, char* value, const __FlashStringHelper* sep) {
+
+void print_value(const char* vname, char* value, const __FlashStringHelper* sep) {
 	Serial.print(vname); Serial.print(F(":")); Serial.print(value); Serial.print(sep);
 	}
 
-void print_value(char* vname, int value, const __FlashStringHelper* sep) {
+void print_value(const char* vname, int value, const __FlashStringHelper* sep) {
 	Serial.print(vname); Serial.print(F(":")); Serial.print(value); Serial.print(sep);
 	}
 
-void print_value(char* vname, float value, const __FlashStringHelper* sep) {
+void print_value(const char* vname, float value, const __FlashStringHelper* sep) {
 	Serial.print(vname); Serial.print(F(":")); Serial.print(value, 1); Serial.print(sep);
 	}
 
-void print_value(char* vname, long value, const __FlashStringHelper* sep) {
+void print_value(const char* vname, long value, const __FlashStringHelper* sep) {
 	Serial.print(vname); Serial.print(F(":")); Serial.print(value); Serial.print(sep);
 	}
 
-void print_value(char* vname, uint32_t value, const __FlashStringHelper* sep) {
+void print_value(const char* vname, uint32_t value, const __FlashStringHelper* sep) {
 	Serial.print(vname); Serial.print(F(":")); Serial.print(value); Serial.print(sep);
 	}
 
@@ -290,4 +325,70 @@ void printHex(volatile byte* packet, byte len) {
 		if (i < len - 1) Serial.print('-');
 		}
 	}
-	#endif
+#endif
+
+void update_bme() {
+
+	if (! bme_valid) return;
+	bme_loop++;
+	switch (bme_loop)
+	{
+		case 1:
+		  temperature= mySensor.readTempC();
+		  break;
+		case 2:
+		  pressure= mySensor.readFloatPressure();
+		  break;
+		case 3:
+			humidity = mySensor.readFloatHumidity();
+			break;
+	    case 4:
+			if (! (isnan(temperature) ||
+					isnan(pressure) ||
+					isnan(humidity))) {
+						Serial.print("bme:");
+						Serial.print(temperature);
+						Serial.print(",");
+						Serial.print(pressure);
+						Serial.print(",");
+						Serial.print(humidity);
+						Serial.println();
+					}
+			bme_loop=0;
+			break;
+		default:
+			bme_loop=0;
+	}
+	return;
+};
+
+
+
+
+unsigned int blinky=0;
+void loop() {
+	unsigned long timenow;
+	if (radio.qLen > 0) decode_packet();
+	if (radio.mode == SM_RECEIVING)	digitalWrite(LED, HIGH);
+	else if (radio.mode == SM_SEARCHING) {
+		blinky++;
+		if ((blinky % 100) == 0 ) Toggle_LED();
+		delay(1);
+		}
+	else digitalWrite(LED, LOW);
+	timenow = millis();
+	// Lazy wraparound check
+	if (timenow > time || time == 0 || (time > 100000 && timenow < 100000) ) {
+		time=timenow+BME_DELAY;
+		if (Serial.read() == 'r' ) NVIC_SystemReset();
+	//Serial.println(micros());
+	//	update_bme();
+	//Serial.println(micros());
+	};
+
+
+
+	radio.loop();
+	}
+
+ 
