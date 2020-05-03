@@ -135,6 +135,14 @@ void DavisRFM69::loop() {
 
 	// first see if we have tuned into receive a station previously and failed to actually receive a packet
 	if (mode == SM_RECEIVING) {
+		// There's a bit of a race here as if the packet Interrupt triggers between the above if()
+		// and the below if() it may update curStation to be the next station
+		// however the timing recvBegan will still be the previous loop so this will believe
+		// the packet was lost(until the timing updates later in this function)
+		// so we re-check mode one more time and if the receive packet interrupt cleared it
+		// then we hopefully won't flag a wrong packet as missed
+		// provided the compiler doesn't re-order the checks in the if statement
+
 	  // packet was lost
 		if (difftime(micros(), stations[curStation].recvBegan) > (1 + stations[curStation].lostPackets)*(LATE_PACKET_THRESH + TUNEIN_USEC)
 		&& mode == SM_RECEIVING ) {
